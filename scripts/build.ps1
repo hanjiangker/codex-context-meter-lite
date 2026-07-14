@@ -11,6 +11,7 @@ $exe = Join-Path $stage "codex-context-meter-lite.exe"
 go build -trimpath -ldflags "-s -w -H=windowsgui" -o $exe ./cmd/meter
 
 Copy-Item (Join-Path $repoRoot "README.md") $stage -Force
+Copy-Item (Join-Path $repoRoot "README.zh-CN.md") $stage -Force
 Copy-Item (Join-Path $repoRoot "LICENSE") $stage -Force
 Copy-Item (Join-Path $repoRoot "THIRD_PARTY_NOTICES.md") $stage -Force
 $stageImages = Join-Path $stage "docs\images"
@@ -24,6 +25,7 @@ if (Test-Path $zip) {
 $releaseFiles = @(
     "codex-context-meter-lite.exe",
     "README.md",
+    "README.zh-CN.md",
     "LICENSE",
     "THIRD_PARTY_NOTICES.md",
     "docs"
