@@ -1,0 +1,6 @@
+/dist/
+/build/
+*.exe
+*.zip
+*.log
+进度跟踪.md
