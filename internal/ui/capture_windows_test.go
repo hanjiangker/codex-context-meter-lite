@@ -89,6 +89,14 @@ func TestCaptureDemoWindow(t *testing.T) {
 			t.Fatal("meter window did not expand on hover")
 		}
 	}
+	if os.Getenv("CCML_CAPTURE_TOGGLE_THEME") == "1" {
+		procSendMessage.Call(uintptr(hwnd), wmCommand, uintptr(idToggleTheme), 0)
+		defer func() {
+			procSendMessage.Call(uintptr(hwnd), wmCommand, uintptr(idToggleTheme), 0)
+			time.Sleep(300 * time.Millisecond)
+		}()
+		time.Sleep(300 * time.Millisecond)
+	}
 	img, err := captureWindow(hwnd)
 	if err != nil {
 		t.Fatal(err)

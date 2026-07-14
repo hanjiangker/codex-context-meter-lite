@@ -18,7 +18,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-const version = "0.1.0"
+const version = "0.1.1"
 
 var defaultDemo = "false"
 

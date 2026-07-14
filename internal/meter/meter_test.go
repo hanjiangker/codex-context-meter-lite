@@ -1,9 +1,34 @@
 package meter
 
 import (
+	"math"
 	"testing"
 	"time"
 )
+
+func TestUsageCacheHitPercent(t *testing.T) {
+	tests := []struct {
+		name  string
+		usage Usage
+		want  float64
+		ok    bool
+	}{
+		{name: "turn", usage: Usage{InputTokens: 141_200, CachedInputTokens: 137_800}, want: 97.59206798866856, ok: true},
+		{name: "session", usage: Usage{InputTokens: 2_840_000, CachedInputTokens: 2_610_000}, want: 91.90140845070422, ok: true},
+		{name: "no cache", usage: Usage{InputTokens: 100}, want: 0, ok: true},
+		{name: "no input", usage: Usage{}, ok: false},
+		{name: "negative cache", usage: Usage{InputTokens: 100, CachedInputTokens: -1}, ok: false},
+		{name: "cache exceeds input", usage: Usage{InputTokens: 100, CachedInputTokens: 120}, want: 100, ok: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, ok := test.usage.CacheHitPercent()
+			if ok != test.ok || math.Abs(got-test.want) > 1e-9 {
+				t.Fatalf("CacheHitPercent() = (%v, %v), want (%v, %v)", got, ok, test.want, test.ok)
+			}
+		})
+	}
+}
 
 func TestBuildUsesTotalTokensForContextPressure(t *testing.T) {
 	snapshot := Build(TokenInfo{

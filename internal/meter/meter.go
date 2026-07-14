@@ -13,6 +13,14 @@ type Usage struct {
 	TotalTokens           int64 `json:"total_tokens"`
 }
 
+func (usage Usage) CacheHitPercent() (float64, bool) {
+	if usage.InputTokens <= 0 || usage.CachedInputTokens < 0 {
+		return 0, false
+	}
+	percent := float64(usage.CachedInputTokens) / float64(usage.InputTokens) * 100
+	return clamp(percent, 0, 100), true
+}
+
 type TokenInfo struct {
 	TotalUsage         Usage `json:"total_token_usage"`
 	LastUsage          Usage `json:"last_token_usage"`

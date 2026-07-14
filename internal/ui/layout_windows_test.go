@@ -1,6 +1,36 @@
 package ui
 
-import "testing"
+import (
+	"testing"
+
+	"codex-context-meter-lite/internal/meter"
+)
+
+func TestFormatCacheLabel(t *testing.T) {
+	tests := []struct {
+		name  string
+		usage meter.Usage
+		want  string
+	}{
+		{name: "turn", usage: meter.Usage{InputTokens: 141_200, CachedInputTokens: 137_800}, want: "CACHE 97.6%"},
+		{name: "session", usage: meter.Usage{InputTokens: 2_840_000, CachedInputTokens: 2_610_000}, want: "CACHE 91.9%"},
+		{name: "zero", usage: meter.Usage{InputTokens: 100}, want: "CACHE 0.0%"},
+		{name: "unavailable", usage: meter.Usage{}, want: "CACHE --"},
+		{name: "negative cache", usage: meter.Usage{InputTokens: 100, CachedInputTokens: -1}, want: "CACHE --"},
+		{name: "clamped", usage: meter.Usage{InputTokens: 100, CachedInputTokens: 120}, want: "CACHE 100%"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := formatCacheLabel(test.usage)
+			if got != test.want {
+				t.Fatalf("formatCacheLabel() = %q, want %q", got, test.want)
+			}
+			if len(got) > 11 {
+				t.Fatalf("cache label %q exceeds the metric cell capacity", got)
+			}
+		})
+	}
+}
 
 func TestPanelHeight(t *testing.T) {
 	tests := []struct {

@@ -16,7 +16,7 @@ Codex Context Meter Lite 直接读取 Codex 已生成的本地 session JSONL，�
 
 - **实时上下文占用：** 每 500 ms 检查一次当前 session，使用 `last_token_usage.total_tokens / model_context_window` 计算 Used/Left 百分比。
 - **连续压力进度条：** 已用上下文不超过 75% 时为绿色，超过 75% 至 85% 为橙黄色，超过 85% 为红色。
-- **紧凑与详情视图：** 默认显示 28 px 紧凑条；鼠标悬停时展开，分别显示本轮和整个 session 的 Total、Input、Cache、Output 与 Reasoning token。
+- **紧凑与详情视图：** 默认显示 28 px 紧凑条；鼠标悬停时展开，分别显示本轮和整个 session 的 Total、Input、Cache、缓存命中率、Output 与 Reasoning token。
 - **跟随 Codex 窗口：** 浮窗不抢焦点，使用应用包身份和受控路径规则识别 Codex，支持多窗口前台切换，并跟随窗口移动、缩放、最小化、DPI 和显示器切换。
 - **四角锚定：** 可拖动到 Codex 窗口任意角落。顶部锚点向下展开，底部锚点向上展开。
 - **自动或固定任务：** 默认选择最新包含有效 `token_count` 的 session，也可从托盘菜单固定到指定任务。任务名称来自 `session_index.jsonl`。
@@ -85,10 +85,13 @@ Codex Context Meter Lite 直接读取 Codex 已生成的本地 session JSONL，�
 | `Session` | 当前 session 累计 `total_token_usage` |
 | `Input` | 输入 token |
 | `Cache` | 命中的缓存输入 token |
+| `Cache hit` | 本轮或整个 session 的缓存输入 token 除以输入 token |
 | `Output` | 输出 token |
 | `Reasoning` | 推理输出 token |
 
 `Session` 是累计消耗，不等于模型上下文窗口占用；上下文压力始终以最新 `last_token_usage.total_tokens` 为准。
+
+缓存命中率会分别按 Turn 和 Session 计算。Session 数值使用累计缓存输入 token 除以累计输入 token，不是每轮百分比的平均值。
 
 ## 故障排查
 
@@ -135,7 +138,7 @@ go vet ./...
 .\scripts\build.ps1
 ```
 
-发布脚本生成单 EXE portable ZIP，不会安装任何依赖。当前构建目标为 `dist\codex-context-meter-lite-windows-amd64-v0.1.0.zip`。
+发布脚本生成单 EXE portable ZIP，不会安装任何依赖。当前构建目标为 `dist\codex-context-meter-lite-windows-amd64-v0.1.1.zip`。
 
 ## 卸载
 

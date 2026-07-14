@@ -16,7 +16,7 @@ Codex Context Meter Lite reads the local session JSONL files already produced by
 
 - **Live context usage:** Checks the active session every 500 ms and calculates Used/Left as `last_token_usage.total_tokens / model_context_window`.
 - **Continuous pressure bar:** Green through 75% used, amber above 75% through 85%, and red above 85%.
-- **Compact and detailed views:** Shows a 28 px compact strip by default; hover to expand Turn and Session totals for Total, Input, Cache, Output, and Reasoning tokens.
+- **Compact and detailed views:** Shows a 28 px compact strip by default; hover to expand Turn and Session totals for Total, Input, Cache, cache hit rate, Output, and Reasoning tokens.
 - **Codex window tracking:** The non-activating overlay identifies Codex using package identity and controlled path rules, follows the active Codex window when multiple windows are open, and tracks movement, resizing, minimization, DPI, and monitor changes.
 - **Four-corner anchoring:** Drag it to any Codex window corner. Top anchors expand downward and bottom anchors expand upward.
 - **Automatic or pinned task:** Selects the latest session containing a valid `token_count` event by default, or lets you pin a task from the tray menu. Task names come from `session_index.jsonl`.
@@ -85,10 +85,13 @@ When `Start with Windows` is enabled, the app writes only `HKCU\Software\Microso
 | `Session` | Cumulative `total_token_usage` for the session |
 | `Input` | Input tokens |
 | `Cache` | Cached input tokens |
+| `Cache hit` | Cached input tokens divided by input tokens for the turn or session |
 | `Output` | Output tokens |
 | `Reasoning` | Reasoning output tokens |
 
 `Session` is cumulative consumption, not model context-window occupancy; context pressure always uses the latest `last_token_usage.total_tokens`.
+
+Cache hit rate is calculated independently for Turn and Session. The Session value uses cumulative cached input tokens divided by cumulative input tokens; it is not an average of per-turn percentages.
 
 ## Troubleshooting
 
@@ -135,7 +138,7 @@ go vet ./...
 .\scripts\build.ps1
 ```
 
-The release script creates a portable single-EXE ZIP and installs no dependencies. The current build target is `dist\codex-context-meter-lite-windows-amd64-v0.1.0.zip`.
+The release script creates a portable single-EXE ZIP and installs no dependencies. The current build target is `dist\codex-context-meter-lite-windows-amd64-v0.1.1.zip`.
 
 ## Uninstall
 

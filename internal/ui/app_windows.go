@@ -962,7 +962,7 @@ func drawMetricColumn(dc HDC, small, regular, bold HGDIOBJ, fg uint32, colors me
 	drawText(dc, bold, fg, formatTokens(usage.TotalTokens), rect{area.Left, area.Top + 14, area.Right, area.Top + 34}, dtLeft|dtVCenter|dtSingleLine)
 	middle := area.Left + (area.Right-area.Left)/2
 	drawMetricLabel(dc, small, colors.input, "INPUT", rect{area.Left, area.Top + 34, middle, area.Top + 46})
-	drawMetricLabel(dc, small, colors.cache, "CACHE", rect{middle, area.Top + 34, area.Right, area.Top + 46})
+	drawMetricLabel(dc, small, colors.cache, formatCacheLabel(usage), rect{middle, area.Top + 34, area.Right, area.Top + 46})
 	drawText(dc, regular, fg, formatTokens(usage.InputTokens), rect{area.Left, area.Top + 45, middle, area.Top + 59}, dtLeft|dtVCenter|dtSingleLine)
 	drawText(dc, regular, fg, formatTokens(usage.CachedInputTokens), rect{middle, area.Top + 45, area.Right, area.Top + 59}, dtLeft|dtVCenter|dtSingleLine)
 	drawMetricLabel(dc, small, colors.output, "OUTPUT", rect{area.Left, area.Top + 59, middle, area.Top + 71})
@@ -1031,6 +1031,17 @@ func formatTokens(value int64) string {
 	default:
 		return fmt.Sprintf("%d", value)
 	}
+}
+
+func formatCacheLabel(usage meter.Usage) string {
+	percent, ok := usage.CacheHitPercent()
+	if !ok {
+		return "CACHE --"
+	}
+	if percent >= 99.95 {
+		return "CACHE 100%"
+	}
+	return fmt.Sprintf("CACHE %.1f%%", percent)
 }
 
 func formatHeaderTokens(value int64) string {

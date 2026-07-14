@@ -18,7 +18,7 @@ $stageImages = Join-Path $stage "docs\images"
 New-Item -ItemType Directory -Force $stageImages | Out-Null
 Copy-Item (Join-Path $repoRoot "docs\images\*.png") $stageImages -Force
 
-$zip = Join-Path $dist "codex-context-meter-lite-windows-amd64-v0.1.0.zip"
+$zip = Join-Path $dist "codex-context-meter-lite-windows-amd64-v0.1.1.zip"
 if (Test-Path $zip) {
     throw "Release archive already exists: $zip"
 }
