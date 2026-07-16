@@ -18,6 +18,7 @@ Codex Context Meter Lite 直接读取 Codex 已生成的本地 session JSONL，�
 - **连续压力进度条：** 已用上下文不超过 75% 时为绿色，超过 75% 至 85% 为橙黄色，超过 85% 为红色。
 - **紧凑与详情视图：** 默认显示 28 px 紧凑条；鼠标悬停时展开，分别显示本轮和整个 session 的 Total、Input、Cache、缓存命中率、Output 与 Reasoning token。
 - **跟随 Codex 窗口：** 浮窗不抢焦点，使用应用包身份和受控路径规则识别 Codex，支持多窗口前台切换，并跟随窗口移动、缩放、最小化、DPI 和显示器切换。
+- **稳定重识别窗口：** Codex 窗口暂时不可用或重建后，程序会安全地重新识别窗口，提升长时间运行的稳定性。
 - **四角锚定：** 可拖动到 Codex 窗口任意角落。顶部锚点向下展开，底部锚点向上展开。
 - **自动或固定任务：** 默认选择最新包含有效 `token_count` 的 session，也可从托盘菜单固定到指定任务。任务名称来自 `session_index.jsonl`。
 - **容错增量读取：** 支持 JSONL 半行写入、损坏行、文件截断、轮转和 context compaction，不读取对话正文。
@@ -95,6 +96,8 @@ Codex Context Meter Lite 直接读取 Codex 已生成的本地 session JSONL，�
 
 ## 故障排查
 
+Codex 最小化或失去前台焦点时，悬浮条按设计自动隐藏。如果托盘图标仍在且 `codex-context-meter-lite.exe` 进程仍在运行，则不是程序崩溃；切回 Codex 后悬浮条会重新显示。只有托盘图标消失且进程不再运行时，才按异常退出排查。
+
 如果托盘图标存在但 Codex 窗口没有悬浮条，先打开托盘菜单查看 `Codex window` 与 `Session data` 状态。
 
 ```powershell
@@ -138,7 +141,7 @@ go vet ./...
 .\scripts\build.ps1
 ```
 
-发布脚本生成单 EXE portable ZIP，不会安装任何依赖。当前构建目标为 `dist\codex-context-meter-lite-windows-amd64-v0.1.1.zip`。
+发布脚本生成单 EXE portable ZIP，不会安装任何依赖。当前构建目标为 `dist\codex-context-meter-lite-windows-amd64-v0.1.2.zip`。
 
 ## 卸载
 

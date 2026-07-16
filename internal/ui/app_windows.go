@@ -99,6 +99,7 @@ const (
 	wmRButtonUp     = 0x0205
 	wmMouseLeave    = 0x02A3
 	wmNCHitTest     = 0x0084
+	wmNCDestroy     = 0x0082
 	wmEnterSizeMove = 0x0231
 	wmExitSizeMove  = 0x0232
 	wmApp           = 0x8000
@@ -224,41 +225,51 @@ var (
 	procGetModuleHandle = kernel32.NewProc("GetModuleHandleW")
 )
 
-var appByHWND sync.Map
+var (
+	appByHWND             sync.Map
+	globalWndProcCallback = syscall.NewCallback(globalWndProc)
+)
+
+type postWindowMessageFunc func(HWND, uint32)
+
+func postNativeWindowMessage(hwnd HWND, message uint32) {
+	procPostMessage.Call(uintptr(hwnd), uintptr(message), 0, 0)
+}
 
 type App struct {
-	mu               sync.RWMutex
-	hwnd             HWND
-	config           config.Config
-	view             ViewState
-	handler          ActionHandler
-	tracker          appwindow.Tracker
-	hovered          bool
-	tracking         bool
-	dragging         bool
-	standalone       bool
-	standalonePlaced bool
-	quitting         bool
-	trayIcon         uintptr
-	fontSmall        HGDIOBJ
-	font             HGDIOBJ
-	fontBold         HGDIOBJ
-	fontLarge        HGDIOBJ
-	positionValid    bool
-	lastVisible      bool
-	lastX            int32
-	lastY            int32
-	lastWidth        int32
-	lastHeight       int32
-	lastRadius       int32
-	dwmRounded       bool
-	painted          bool
-	positionLogged   bool
-	viewLogged       bool
+	mu                sync.RWMutex
+	hwnd              HWND
+	config            config.Config
+	view              ViewState
+	handler           ActionHandler
+	tracker           appwindow.Tracker
+	hovered           bool
+	tracking          bool
+	dragging          bool
+	standalone        bool
+	standalonePlaced  bool
+	quitting          bool
+	trayIcon          uintptr
+	fontSmall         HGDIOBJ
+	font              HGDIOBJ
+	fontBold          HGDIOBJ
+	fontLarge         HGDIOBJ
+	positionValid     bool
+	lastVisible       bool
+	lastX             int32
+	lastY             int32
+	lastWidth         int32
+	lastHeight        int32
+	lastRadius        int32
+	dwmRounded        bool
+	painted           bool
+	positionLogged    bool
+	viewLogged        bool
+	postWindowMessage postWindowMessageFunc
 }
 
 func New(cfg config.Config, handler ActionHandler, standalone bool) *App {
-	app := &App{config: cfg, handler: handler, standalone: standalone}
+	app := &App{config: cfg, handler: handler, standalone: standalone, postWindowMessage: postNativeWindowMessage}
 	if standalone {
 		app.hovered = true
 	}
@@ -288,27 +299,54 @@ func (a *App) SetView(view ViewState) {
 		}
 		fmt.Fprintf(os.Stderr, "data loaded title=%q used=%.1f left=%.1f\n", title, view.Snapshot.UsedPercent, view.Snapshot.LeftPercent)
 	}
-	if a.hwnd != 0 {
-		procPostMessage.Call(uintptr(a.hwnd), wmAppUpdate, 0, 0)
-	}
+	a.postMessage(wmAppUpdate)
 }
 
 func (a *App) SetConfig(cfg config.Config) {
 	a.mu.Lock()
 	a.config = cfg
 	a.mu.Unlock()
-	if a.hwnd != 0 {
-		procPostMessage.Call(uintptr(a.hwnd), wmAppUpdate, 0, 0)
-	}
+	a.postMessage(wmAppUpdate)
 }
 
 func (a *App) Quit() {
 	a.mu.Lock()
 	a.quitting = true
 	a.mu.Unlock()
-	if a.hwnd != 0 {
-		procPostMessage.Call(uintptr(a.hwnd), wmClose, 0, 0)
+	a.postMessage(wmClose)
+}
+
+func (a *App) publishWindow(hwnd HWND) {
+	a.mu.Lock()
+	a.hwnd = hwnd
+	a.mu.Unlock()
+}
+
+func (a *App) clearWindow(hwnd HWND) {
+	a.mu.Lock()
+	if a.hwnd == hwnd {
+		a.hwnd = 0
 	}
+	a.mu.Unlock()
+}
+
+func (a *App) windowHandle() HWND {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.hwnd
+}
+
+func (a *App) postMessage(message uint32) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if a.hwnd == 0 {
+		return
+	}
+	post := a.postWindowMessage
+	if post == nil {
+		post = postNativeWindowMessage
+	}
+	post(a.hwnd, message)
 }
 
 func (a *App) Run() error {
@@ -324,8 +362,7 @@ func (a *App) Run() error {
 		defer procDestroyIcon.Call(icon)
 	}
 	a.trayIcon = icon
-	wndProc := syscall.NewCallback(globalWndProc)
-	wc := wndClassEx{CbSize: uint32(unsafe.Sizeof(wndClassEx{})), Style: csHRedraw | csVRedraw | csDblClks, WndProc: wndProc, Instance: instance, Icon: icon, Cursor: cursor, ClassName: name, IconSmall: icon}
+	wc := wndClassEx{CbSize: uint32(unsafe.Sizeof(wndClassEx{})), Style: csHRedraw | csVRedraw | csDblClks, WndProc: globalWndProcCallback, Instance: instance, Icon: icon, Cursor: cursor, ClassName: name, IconSmall: icon}
 	if result, _, err := procRegisterClassEx.Call(uintptr(unsafe.Pointer(&wc))); result == 0 {
 		return fmt.Errorf("RegisterClassExW: %w", err)
 	}
@@ -338,10 +375,14 @@ func (a *App) Run() error {
 	if hwnd == 0 {
 		return fmt.Errorf("CreateWindowExW: %w", err)
 	}
-	a.hwnd = HWND(hwnd)
-	a.dwmRounded = enableDwmRoundedCorners(a.hwnd)
-	appByHWND.Store(a.hwnd, a)
-	defer appByHWND.Delete(a.hwnd)
+	window := HWND(hwnd)
+	appByHWND.Store(window, a)
+	a.publishWindow(window)
+	defer func() {
+		a.clearWindow(window)
+		appByHWND.Delete(window)
+	}()
+	a.dwmRounded = enableDwmRoundedCorners(window)
 	a.createFonts()
 	a.addTrayIcon()
 	procSetTimer.Call(hwnd, 1, 250, 0)
@@ -374,10 +415,10 @@ func globalWndProc(hwnd uintptr, message uint32, wParam, lParam uintptr) uintptr
 		result, _, _ := procDefWindowProc.Call(hwnd, uintptr(message), wParam, lParam)
 		return result
 	}
-	return value.(*App).wndProc(message, wParam, lParam)
+	return value.(*App).wndProc(HWND(hwnd), message, wParam, lParam)
 }
 
-func (a *App) wndProc(message uint32, wParam, lParam uintptr) uintptr {
+func (a *App) wndProc(hwnd HWND, message uint32, wParam, lParam uintptr) uintptr {
 	switch message {
 	case wmPaint:
 		a.paint()
@@ -457,8 +498,13 @@ func (a *App) wndProc(message uint32, wParam, lParam uintptr) uintptr {
 		}
 		procPostQuitMessage.Call(0)
 		return 0
+	case wmNCDestroy:
+		a.clearWindow(hwnd)
+		appByHWND.Delete(hwnd)
+		result, _, _ := procDefWindowProc.Call(uintptr(hwnd), uintptr(message), wParam, lParam)
+		return result
 	}
-	result, _, _ := procDefWindowProc.Call(uintptr(a.hwnd), uintptr(message), wParam, lParam)
+	result, _, _ := procDefWindowProc.Call(uintptr(hwnd), uintptr(message), wParam, lParam)
 	return result
 }
 
@@ -489,25 +535,28 @@ func (a *App) syncPosition() {
 		a.positionOverlay(x, y, width, height, int32(radius))
 		return
 	}
-	targetRect, ok := a.tracker.Rect()
-	foreground := a.tracker.IsForeground()
+	target := a.tracker.Snapshot()
 	if debugUI() && !a.positionLogged {
 		a.positionLogged = true
-		fmt.Fprintf(os.Stderr, "codex target=%d rect=%+v valid=%v foreground=%v\n", a.tracker.Target(), targetRect, ok, foreground)
+		fmt.Fprintf(os.Stderr, "codex target=%d rect=%+v valid=%v foreground=%v\n", target.Target, target.Rect, target.Valid, target.Foreground)
 	}
-	if !ok || !foreground {
+	if !shouldShowTrackedOverlay(target) {
 		a.hideOverlay()
 		return
 	}
-	dpiScale := float64(a.tracker.DPI()) / 96
+	dpiScale := float64(target.DPI) / 96
 	scale := cfg.Scale * dpiScale
 	width := int32(math.Round(float64(panelWidth) * scale))
 	height := int32(math.Round(float64(panelHeight(a.hovered, known)) * scale))
 	ox := int32(math.Round(float64(cfg.OffsetX) * dpiScale))
 	oy := int32(math.Round(float64(cfg.OffsetY) * dpiScale))
-	targetBounds := rect{targetRect.Left, targetRect.Top, targetRect.Right, targetRect.Bottom}
+	targetBounds := rect{target.Rect.Left, target.Rect.Top, target.Rect.Right, target.Rect.Bottom}
 	x, y := anchoredPosition(cfg.Anchor, targetBounds, width, height, ox, oy)
 	a.positionOverlay(x, y, width, height, int32(math.Round(8*scale)))
+}
+
+func shouldShowTrackedOverlay(target appwindow.WindowSnapshot) bool {
+	return target.Valid && target.Foreground
 }
 
 func (a *App) hideOverlay() {
@@ -565,16 +614,16 @@ func (a *App) persistOffset() {
 	if a.standalone {
 		return
 	}
-	target, ok := a.tracker.Rect()
-	if !ok {
+	target := a.tracker.Snapshot()
+	if !target.Valid {
 		return
 	}
 	var current rect
 	if result, _, _ := procGetWindowRect.Call(uintptr(a.hwnd), uintptr(unsafe.Pointer(&current))); result == 0 {
 		return
 	}
-	dpiScale := float64(a.tracker.DPI()) / 96
-	targetBounds := rect{target.Left, target.Top, target.Right, target.Bottom}
+	dpiScale := float64(target.DPI) / 96
+	targetBounds := rect{target.Rect.Left, target.Rect.Top, target.Rect.Right, target.Rect.Bottom}
 	anchor := nearestAnchor(targetBounds, current)
 	x, y := anchorOffsets(anchor, targetBounds, current)
 	a.emit(Action{Kind: ActionMove, Anchor: anchor, OffsetX: max(0, int(math.Round(float64(x)/dpiScale))), OffsetY: max(0, int(math.Round(float64(y)/dpiScale)))})

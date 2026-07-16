@@ -95,6 +95,11 @@ func meterIconPixels(size int) []color.RGBA {
 	return pixels
 }
 
+// MeterIconPixels renders the icon shared by the tray and executable resources.
+func MeterIconPixels(size int) []color.RGBA {
+	return meterIconPixels(size)
+}
+
 func meterIconSample(px, py float64) color.RGBA {
 	if !insideRoundedBox(px, py, 1, 31, 7.2) {
 		return color.RGBA{}

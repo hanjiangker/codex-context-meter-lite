@@ -18,6 +18,7 @@ Codex Context Meter Lite reads the local session JSONL files already produced by
 - **Continuous pressure bar:** Green through 75% used, amber above 75% through 85%, and red above 85%.
 - **Compact and detailed views:** Shows a 28 px compact strip by default; hover to expand Turn and Session totals for Total, Input, Cache, cache hit rate, Output, and Reasoning tokens.
 - **Codex window tracking:** The non-activating overlay identifies Codex using package identity and controlled path rules, follows the active Codex window when multiple windows are open, and tracks movement, resizing, minimization, DPI, and monitor changes.
+- **Stable window reacquisition:** Safely reacquires Codex after its window is temporarily unavailable or recreated, improving long-running stability.
 - **Four-corner anchoring:** Drag it to any Codex window corner. Top anchors expand downward and bottom anchors expand upward.
 - **Automatic or pinned task:** Selects the latest session containing a valid `token_count` event by default, or lets you pin a task from the tray menu. Task names come from `session_index.jsonl`.
 - **Resilient incremental reading:** Handles partial JSONL writes, malformed lines, truncation, rotation, and context compaction without reading conversation text.
@@ -95,6 +96,8 @@ Cache hit rate is calculated independently for Turn and Session. The Session val
 
 ## Troubleshooting
 
+The overlay is expected to hide whenever Codex is minimized or loses foreground focus. If the tray icon remains and `codex-context-meter-lite.exe` is still running, the app has not crashed; switch back to Codex to show the overlay again. Treat it as an unexpected exit only if the tray icon disappears and the process is no longer running.
+
 If the tray icon is present but no overlay appears on Codex, first open the tray menu and check the `Codex window` and `Session data` status lines.
 
 ```powershell
@@ -138,7 +141,7 @@ go vet ./...
 .\scripts\build.ps1
 ```
 
-The release script creates a portable single-EXE ZIP and installs no dependencies. The current build target is `dist\codex-context-meter-lite-windows-amd64-v0.1.1.zip`.
+The release script creates a portable single-EXE ZIP and installs no dependencies. The current build target is `dist\codex-context-meter-lite-windows-amd64-v0.1.2.zip`.
 
 ## Uninstall
 

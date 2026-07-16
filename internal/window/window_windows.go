@@ -3,7 +3,9 @@ package window
 import (
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -18,7 +20,10 @@ type Rect struct {
 func (r Rect) Width() int32  { return r.Right - r.Left }
 func (r Rect) Height() int32 { return r.Bottom - r.Top }
 
-const processQueryLimitedInformation = 0x1000
+const (
+	processQueryLimitedInformation = 0x1000
+	fallbackSearchCooldown         = time.Second
+)
 
 const (
 	getAncestorRoot      = 2
@@ -38,11 +43,51 @@ var (
 	procGetAncestor              = user32.NewProc("GetAncestor")
 	procGetDpiForWindow          = user32.NewProc("GetDpiForWindow")
 	procGetPackageFamilyName     = kernel32.NewProc("GetPackageFamilyName")
+
+	enumWindowsCallback = syscall.NewCallback(enumWindowsProc)
+	enumerateWindows    = func(callback, context uintptr) {
+		procEnumWindows.Call(callback, context)
+	}
+	enumWindowsStates = struct {
+		sync.RWMutex
+		next   uintptr
+		values map[uintptr]*enumWindowsState
+	}{values: make(map[uintptr]*enumWindowsState)}
 )
 
 type Tracker struct {
 	target             HWND
 	executableOverride string
+	nextFallbackSearch time.Time
+	ops                *trackerOps
+}
+
+type WindowSnapshot struct {
+	Target     HWND
+	Rect       Rect
+	DPI        uint32
+	Foreground bool
+	Valid      bool
+}
+
+type trackerOps struct {
+	now             func() time.Time
+	foregroundCodex func(string) HWND
+	isUsable        func(HWND) bool
+	find            func(string) HWND
+	readRect        func(HWND) (Rect, bool)
+	isForeground    func(HWND) bool
+	dpi             func(HWND) uint32
+}
+
+var defaultTrackerOps = trackerOps{
+	now:             time.Now,
+	foregroundCodex: foregroundCodexWindow,
+	isUsable:        isUsableWindow,
+	find:            findCodexWindow,
+	readRect:        readWindowRect,
+	isForeground:    isForegroundWindow,
+	dpi:             windowDPI,
 }
 
 // SetExecutableOverride restricts unpackaged-process matching to one exact
@@ -54,45 +99,73 @@ func (t *Tracker) SetExecutableOverride(value string) {
 }
 
 func (t *Tracker) Target() HWND {
-	if foreground := foregroundCodexWindow(t.executableOverride); foreground != 0 {
+	return t.targetWithOps(t.operations())
+}
+
+func (t *Tracker) targetWithOps(ops trackerOps) HWND {
+	if foreground := ops.foregroundCodex(t.executableOverride); foreground != 0 {
 		t.target = foreground
 		return t.target
 	}
-	if t.target != 0 && isUsableWindow(t.target) {
+	if t.target != 0 && ops.isUsable(t.target) {
 		return t.target
 	}
-	t.target = findCodexWindow(t.executableOverride)
+	t.target = 0
+	now := ops.now()
+	if now.Before(t.nextFallbackSearch) {
+		return 0
+	}
+	t.nextFallbackSearch = now.Add(fallbackSearchCooldown)
+	t.target = ops.find(t.executableOverride)
 	return t.target
 }
 
-func (t *Tracker) Invalidate() { t.target = 0 }
+func (t *Tracker) Invalidate() {
+	t.target = 0
+	t.nextFallbackSearch = time.Time{}
+}
+
+func (t *Tracker) Snapshot() WindowSnapshot {
+	ops := t.operations()
+	target := t.targetWithOps(ops)
+	if target == 0 {
+		return WindowSnapshot{}
+	}
+	windowRect, valid := ops.readRect(target)
+	if !valid {
+		return WindowSnapshot{Target: target}
+	}
+	return WindowSnapshot{
+		Target:     target,
+		Rect:       windowRect,
+		DPI:        ops.dpi(target),
+		Foreground: ops.isForeground(target),
+		Valid:      true,
+	}
+}
+
+func (t *Tracker) operations() trackerOps {
+	if t.ops != nil {
+		return *t.ops
+	}
+	return defaultTrackerOps
+}
 
 func (t *Tracker) Rect() (Rect, bool) {
-	target := t.Target()
-	if target == 0 || !IsVisible(target) || IsMinimized(target) {
-		return Rect{}, false
-	}
-	var rect Rect
-	result, _, _ := procGetWindowRect.Call(uintptr(target), uintptr(unsafe.Pointer(&rect)))
-	return rect, result != 0 && rect.Width() > 0 && rect.Height() > 0
+	snapshot := t.Snapshot()
+	return snapshot.Rect, snapshot.Valid
 }
 
 func (t *Tracker) IsForeground() bool {
-	target := t.Target()
-	foreground, _, _ := procGetForegroundWindow.Call()
-	return target != 0 && normalizeWindow(HWND(foreground)) == normalizeWindow(target)
+	return t.Snapshot().Foreground
 }
 
 func (t *Tracker) DPI() uint32 {
-	target := t.Target()
-	if target == 0 {
+	dpi := t.Snapshot().DPI
+	if dpi == 0 {
 		return 96
 	}
-	result, _, _ := procGetDpiForWindow.Call(uintptr(target))
-	if result == 0 {
-		return 96
-	}
-	return uint32(result)
+	return dpi
 }
 
 func IsVisible(hwnd HWND) bool {
@@ -112,6 +185,31 @@ func isWindow(hwnd HWND) bool {
 
 func isUsableWindow(hwnd HWND) bool {
 	return hwnd != 0 && isWindow(hwnd) && IsVisible(hwnd) && !IsMinimized(hwnd)
+}
+
+func readWindowRect(hwnd HWND) (Rect, bool) {
+	if hwnd == 0 || !IsVisible(hwnd) || IsMinimized(hwnd) {
+		return Rect{}, false
+	}
+	var windowRect Rect
+	result, _, _ := procGetWindowRect.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&windowRect)))
+	return windowRect, result != 0 && windowRect.Width() > 0 && windowRect.Height() > 0
+}
+
+func isForegroundWindow(hwnd HWND) bool {
+	foreground, _, _ := procGetForegroundWindow.Call()
+	return hwnd != 0 && normalizeWindow(HWND(foreground)) == normalizeWindow(hwnd)
+}
+
+func windowDPI(hwnd HWND) uint32 {
+	if hwnd == 0 {
+		return 96
+	}
+	result, _, _ := procGetDpiForWindow.Call(uintptr(hwnd))
+	if result == 0 {
+		return 96
+	}
+	return uint32(result)
 }
 
 func normalizeWindow(hwnd HWND) HWND {
@@ -148,6 +246,12 @@ type windowCandidate struct {
 	area   int64
 }
 
+type enumWindowsState struct {
+	executableOverride string
+	candidates         []windowCandidate
+	seen               map[HWND]struct{}
+}
+
 func chooseCodexCandidate(candidates []windowCandidate) HWND {
 	var best HWND
 	var bestArea int64
@@ -164,35 +268,64 @@ func chooseCodexCandidate(candidates []windowCandidate) HWND {
 }
 
 func findCodexWindow(executableOverride string) HWND {
-	var candidates []windowCandidate
-	seen := make(map[HWND]struct{})
-	var best HWND
-	callback := syscall.NewCallback(func(hwnd uintptr, _ uintptr) uintptr {
-		handle := normalizeWindow(HWND(hwnd))
-		if !isUsableWindow(handle) {
-			return 1
-		}
-		if _, ok := seen[handle]; ok {
-			return 1
-		}
-		if !isCodexWindow(handle, executableOverride) {
-			return 1
-		}
-		seen[handle] = struct{}{}
-		var rect Rect
-		ok, _, _ := procGetWindowRect.Call(uintptr(handle), uintptr(unsafe.Pointer(&rect)))
-		if ok == 0 {
-			return 1
-		}
-		area := int64(rect.Width()) * int64(rect.Height())
-		if area > 0 {
-			candidates = append(candidates, windowCandidate{handle: handle, area: area})
-		}
+	state := &enumWindowsState{executableOverride: executableOverride, seen: make(map[HWND]struct{})}
+	context := registerEnumWindowsState(state)
+	defer unregisterEnumWindowsState(context)
+	enumerateWindows(enumWindowsCallback, context)
+	return chooseCodexCandidate(state.candidates)
+}
+
+func enumWindowsProc(hwnd, context uintptr) uintptr {
+	state, ok := enumWindowsStateForHandle(context)
+	if !ok {
+		return 0
+	}
+	handle := normalizeWindow(HWND(hwnd))
+	if !isUsableWindow(handle) {
 		return 1
-	})
-	procEnumWindows.Call(callback, 0)
-	best = chooseCodexCandidate(candidates)
-	return best
+	}
+	if _, ok := state.seen[handle]; ok {
+		return 1
+	}
+	if !isCodexWindow(handle, state.executableOverride) {
+		return 1
+	}
+	state.seen[handle] = struct{}{}
+	var windowRect Rect
+	result, _, _ := procGetWindowRect.Call(uintptr(handle), uintptr(unsafe.Pointer(&windowRect)))
+	if result == 0 {
+		return 1
+	}
+	area := int64(windowRect.Width()) * int64(windowRect.Height())
+	if area > 0 {
+		state.candidates = append(state.candidates, windowCandidate{handle: handle, area: area})
+	}
+	return 1
+}
+
+func registerEnumWindowsState(state *enumWindowsState) uintptr {
+	enumWindowsStates.Lock()
+	defer enumWindowsStates.Unlock()
+	enumWindowsStates.next++
+	if enumWindowsStates.next == 0 {
+		enumWindowsStates.next++
+	}
+	handle := enumWindowsStates.next
+	enumWindowsStates.values[handle] = state
+	return handle
+}
+
+func enumWindowsStateForHandle(handle uintptr) (*enumWindowsState, bool) {
+	enumWindowsStates.RLock()
+	defer enumWindowsStates.RUnlock()
+	state, ok := enumWindowsStates.values[handle]
+	return state, ok
+}
+
+func unregisterEnumWindowsState(handle uintptr) {
+	enumWindowsStates.Lock()
+	delete(enumWindowsStates.values, handle)
+	enumWindowsStates.Unlock()
 }
 
 func isCodexWindow(hwnd HWND, executableOverride string) bool {
